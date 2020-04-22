@@ -1,4 +1,5 @@
 // simple timer obj
+#include <ios>
 #include <string>
 #include <iostream>
 #include <iomanip>
@@ -8,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <utility>
+#include <cstring>
 
 namespace fm_timer {
 
@@ -68,28 +70,32 @@ namespace fm_timer {
         std::sort(recs.begin(),recs.end(),[](const auto& a, const auto& b){return a.second._dur>b.second._dur;});
 
         auto prnt_rec=[ts](const auto name, const auto rec, const auto tot) {
-            std::string spt, spr;
-            if (tot>0) {
-                std::cout << std::string(ts+2,' ') 
-                << std::internal << std::setw(14) << "name" << std::setw(12) << "time [s]"
-                << std::setw(8) << "%" << "% of " << root.first <<"\n"
-                << "L" << ts/tabsize << std::string(ts,' ') 
-                << std::setw(14) << std::left << std::setfill('.');
-                spt=std::to_string(rec._dur.count()/tot);
-                spr=std::to_string(rec._dur.count()/root.second._dur.count());
-            }
-            std::cout << name << rec._cnt << std::scientific << rec._dur.count()
-            << (tot>0?std::to_string(rec._dur.count()/tot):"") 
-            << (tot>0)
-//            std:: cout << name << ": call-cnt: " << rec._cnt 
-//            << ", time: "<< std::scientific << rec._dur.count() << " s"
-//            << (tot>0?", %: "+std::to_string(rec._dur.count()/tot):"") <<"\n";
+
+            constexpr int FW=10, CW=80;
+            auto _cnt_string=[](const auto w, const std::string s) {
+                const auto s2=(w-std::size(s))/2;
+                return std::string(s2,' ')+s+std::string(s2,' ');
+            };
+
+             if (tot>0) {
+		        std::cout << std::string(ts,' ') << std::left << std::setfill('.')
+                << std::setw(FW-1) << name << ":"
+                << std::setw(FW) << std::setfill(' ') << std::scientific << rec._dur.count()
+                << std::setw(FW) << std::defaultfloat << rec._dur.count()/tot
+                << std::setw(FW) << rec._dur.count()/root.second._dur.count() <<"\n";
+             }
+             else {
+                 std::cout << std::string(CW,'=') << "\n"
+                 << name <<" "<< rec._cnt <<" "<< std::scientific << rec._dur.count() <<"\n"
+                 << std::string(CW,'-') << "\n";
+                 std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-" << ts/tabsize
+                 << _cnt_string(FW,"name") << _cnt_string(FW,"time[s]") 
+                 << _cnt_string(FW,"  %") << _cnt_string(FW,"%["+root.first+"]") << "\n";
+             }
         };
         // print only if function exists and contains other timers
         if (a_tr._cnt>0 && recs.size()>0) {
-            std::cout << std::string(80,'=') <<"\n";
             prnt_rec (a_seq.substr(0,a_seq.size()-2),a_tr,0);
-            std::cout << std::string(80,'-') <<"\n";
 
             // print finer timer-mesurementes and total
             T total{};
