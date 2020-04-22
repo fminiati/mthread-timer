@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <utility>
+#include <type_traits>
 #include <cstring>
 
 namespace fm_timer {
@@ -62,35 +63,42 @@ namespace fm_timer {
         static std::pair<std::string,T> root;
 
         std::vector<std::pair<std::string,T>> recs;
-        for (auto r : _records) {
-            if (a_seq==r.first.substr(0,a_seq.size()) && r.first.find("::",a_seq.size())==std::string::npos) {
-                recs.push_back(std::make_pair(r.first.substr(a_seq.size()),r.second) );
+        for (const auto& [name,rec] : _records) {
+            if (a_seq==name.substr(0,a_seq.size()) && name.find("::",a_seq.size())==std::string::npos) {
+                recs.emplace_back(std::make_pair(name.substr(a_seq.size()),rec) );
             }
         }
         std::sort(recs.begin(),recs.end(),[](const auto& a, const auto& b){return a.second._dur>b.second._dur;});
 
         auto prnt_rec=[ts](const auto name, const auto rec, const auto tot) {
 
-            constexpr int FW=10, CW=80;
-            auto _cnt_string=[](const auto w, const std::string s) {
-                const auto s2=(w-std::size(s))/2;
-                return std::string(s2,' ')+s+std::string(s2,' ');
+            constexpr int NFW=14, DFW=10, PFW=8, CW=80, TW=2;
+	    auto _cnt_string=[](const auto w, const auto s) {
+	      auto s2{0};
+              if constexpr (std::is_same_v<decltype(s),const std::string>) {
+                s2=(w-std::size(s))/2;
+	      } else {
+                s2=(w-std::strlen(s))/2;
+	      }
+	      return std::string(s2,' ')+s+std::string(s2,' ');
             };
 
+	    const std::string tab(TW,' ');
              if (tot>0) {
 		        std::cout << std::string(ts,' ') << std::left << std::setfill('.')
-                << std::setw(FW-1) << name << ":"
-                << std::setw(FW) << std::setfill(' ') << std::scientific << rec._dur.count()
-                << std::setw(FW) << std::defaultfloat << rec._dur.count()/tot
-                << std::setw(FW) << rec._dur.count()/root.second._dur.count() <<"\n";
+                << std::setw(NFW-1) << name << ":" << tab
+                << std::setw(DFW) << std::setfill(' ') << std::scientific << std::setprecision(4) << rec._dur.count() << tab
+                << std::setw(PFW) << std::defaultfloat << rec._dur.count()/tot << tab
+                << std::setw(PFW) << rec._dur.count()/root.second._dur.count() <<"\n";
              }
              else {
                  std::cout << std::string(CW,'=') << "\n"
-                 << name <<" "<< rec._cnt <<" "<< std::scientific << rec._dur.count() <<"\n"
+                 << name << ": call-cnt: " << rec._cnt 
+                 << ", time: "<< std::scientific << rec._dur.count() << " s\n"
                  << std::string(CW,'-') << "\n";
-                 std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-" << ts/tabsize
-                 << _cnt_string(FW,"name") << _cnt_string(FW,"time[s]") 
-                 << _cnt_string(FW,"  %") << _cnt_string(FW,"%["+root.first+"]") << "\n";
+                 std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-"+std::to_string(ts/tabsize)
+                 << _cnt_string(NFW,"name") << tab << _cnt_string(DFW,"time[s]") << tab 
+                 << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]") << "\n";
              }
         };
         // print only if function exists and contains other timers
@@ -99,17 +107,17 @@ namespace fm_timer {
 
             // print finer timer-mesurementes and total
             T total{};
-            for (const auto& r : recs) {
-                prnt_rec (r.first,r.second,a_tr._dur.count());
-                total._cnt+=r.second._cnt;
-                total._dur+=r.second._dur;
+            for (const auto& [name,rec] : recs) {
+                prnt_rec (name,rec,a_tr._dur.count());
+                total._cnt+=rec._cnt;
+                total._dur+=rec._dur;
             }
             prnt_rec("total",total,a_tr._dur.count());
         }
         // analyse sub-timers
-        for (const auto& r : recs) {
-            if (ts==0) root=r;
-            print_record(a_seq+r.first+"::",r.second,ts+tabsize);
+        for (const auto& [name,rec] : recs) {
+            if (ts==0) root={name,rec};
+            print_record(a_seq+name+"::",rec,ts+tabsize);
         }
         if (ts==0) std::cout<<std::string(80,'-')<<"\n";
 	}
@@ -119,3 +127,5 @@ template <typename T, typename C>
 std::map<std::string,T> fm_timer::Timer<T,C>::_records{};
 template <typename T, typename C>
 std::string fm_timer::Timer<T,C>::_seq{};
+
+
