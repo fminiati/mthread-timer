@@ -7,12 +7,11 @@
 #include <chrono>
 #include <algorithm>
 #include <functional>
-#include <map>
+#include <unordered_map>
 #include <utility>
-#include <type_traits>
 #include <cstring>
 
-namespace fm_timer {
+namespace fm_profile {
 
     // time record
     template <typename I=size_t, typename R=double>
@@ -26,7 +25,7 @@ namespace fm_timer {
         // print out
         void static print_record(const std::string s, const T r, const auto i);
         // static member data
-        static std::map<std::string,T> _records;
+        static std::unordered_map<std::string,T> _records;
         static std::string _seq;
         // member data
         std::string _name;
@@ -52,6 +51,7 @@ namespace fm_timer {
 
         ~Timer() {
             if (_stop) stop();
+	    //std::cout << "calling "<<_name<<"'s destructor\n";
         }
     };
 
@@ -124,8 +124,8 @@ namespace fm_timer {
 };
 
 template <typename T, typename C>
-std::map<std::string,T> fm_timer::Timer<T,C>::_records{};
+std::unordered_map<std::string,T> fm_profile::Timer<T,C>::_records{};
 template <typename T, typename C>
-std::string fm_timer::Timer<T,C>::_seq{};
+std::string fm_profile::Timer<T,C>::_seq{};
 
 
