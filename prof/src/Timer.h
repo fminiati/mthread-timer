@@ -1,17 +1,19 @@
 // simple timer obj
-#include <ios>
 #include <string>
 #include <iostream>
 #include <iomanip>
 #include <vector>
 #include <chrono>
 #include <algorithm>
-#include <functional>
 #include <unordered_map>
 #include <utility>
 #include <cstring>
 
 namespace fm_profile {
+
+#ifndef _TMR_GRANULARITY_
+#define _TMR_GRANULARITY_ 0
+#endif
 
     // time record
     template <typename I=size_t, typename R=double>
@@ -19,12 +21,32 @@ namespace fm_profile {
         I _cnt;
         std::chrono::duration<R> _dur;
     };
-    
-    template <typename T=TimeRecord<>, typename Clock=std::chrono::high_resolution_clock>
-    class Timer {
-        // print out
+
+    // use granulrity param to define when timer is onduty 
+    constexpr bool onduty{true};
+    constexpr bool OnDuty(const int g) {return _TMR_GRANULARITY_>=g;}
+
+    // use alias to select on/off duty based on input granularity
+    template <bool B, typename T, typename Clock> class Timer;
+    template <int Granularity=1,
+	     typename T=TimeRecord<>, 
+	     typename Clock=std::chrono::high_resolution_clock>
+    using Timer_t = Timer<OnDuty(Granularity),T,Clock>;
+
+    // default timer is off duty
+    template <bool B, typename T, typename Clock> class Timer {
+    public:
+	    Timer(const std::string a_name) {}
+	    void stop() {}
+            static void print_record() {}
+	    ~Timer() {}
+    };
+
+    // timer measures when on duty
+    template <typename T, typename Clock> class Timer<onduty,T,Clock> {
+        // print out measurements
         void static print_record(const std::string s, const T r, const auto i);
-        // static member data
+        // use static member data to record measurements
         static std::unordered_map<std::string,T> _records;
         static std::string _seq;
         // member data
@@ -33,11 +55,18 @@ namespace fm_profile {
         bool _stop{true};
 
         public:
+	// start measurement at construction
         Timer(const std::string a_name)
         : _name((_seq.size()>0?"::":"")+a_name), _t_up(Clock::now()) {
             _seq=_seq+_name;
         }
 
+	// stop and record measurement at destruction unless !_stop 
+        ~Timer() {
+            if (_stop) stop();
+        }
+
+	// stop measurement before going out of scope
         void stop() {
             ++_records[_seq]._cnt;
             _records[_seq]._dur += Clock::now() - _t_up;
@@ -45,21 +74,17 @@ namespace fm_profile {
             _stop=false;
         }
 
+	// print out measurements 
         static void print_record() {
             print_record("",T{},0);
-        }
-
-        ~Timer() {
-            if (_stop) stop();
-	    //std::cout << "calling "<<_name<<"'s destructor\n";
         }
     };
 
     template <typename T, typename C>
-	void Timer<T,C>::print_record(const std::string a_seq, const T a_tr, const auto ts) {
+	void Timer<onduty,T,C>::print_record(const std::string a_seq, const T a_tr, const auto ts) {
 
         constexpr auto tabsize=3;
-        const auto& _records=Timer<T,C>::_records;
+        const auto& _records=Timer<onduty,T,C>::_records;
         static std::pair<std::string,T> root;
 
         std::vector<std::pair<std::string,T>> recs;
@@ -102,7 +127,7 @@ namespace fm_profile {
              }
         };
         // print only if function exists and contains other timers
-        if (a_tr._cnt>0 && recs.size()>0) {
+	if (a_tr._cnt>0 && recs.size()>0) {
             prnt_rec (a_seq.substr(0,a_seq.size()-2),a_tr,0);
 
             // print finer timer-mesurementes and total
@@ -124,8 +149,6 @@ namespace fm_profile {
 };
 
 template <typename T, typename C>
-std::unordered_map<std::string,T> fm_profile::Timer<T,C>::_records{};
+std::unordered_map<std::string,T> fm_profile::Timer<fm_profile::onduty,T,C>::_records{};
 template <typename T, typename C>
-std::string fm_profile::Timer<T,C>::_seq{};
-
-
+std::string fm_profile::Timer<fm_profile::onduty,T,C>::_seq{};
