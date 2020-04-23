@@ -126,8 +126,14 @@ namespace fm_profile {
                  << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]") << "\n";
              }
         };
-        // print only if function exists and contains other timers
-	if (a_tr._cnt>0 && recs.size()>0) {
+	if (_records.size()==1) {
+	    // special case of only one entry
+            const auto& rec=recs.begin();
+            prnt_rec (rec->first,rec->second,0);
+	}
+	else {
+		if (a_tr._cnt>0 && recs.size()>0) {
+            // print only if function exists and contains other timers
             prnt_rec (a_seq.substr(0,a_seq.size()-2),a_tr,0);
 
             // print finer timer-mesurementes and total
@@ -144,6 +150,7 @@ namespace fm_profile {
             if (ts==0) root={name,rec};
             print_record(a_seq+name+"::",rec,ts+tabsize);
         }
+	}
         if (ts==0) std::cout<<std::string(80,'-')<<"\n";
 	}
 };
@@ -152,3 +159,4 @@ template <typename T, typename C>
 std::unordered_map<std::string,T> fm_profile::Timer<fm_profile::onduty,T,C>::_records{};
 template <typename T, typename C>
 std::string fm_profile::Timer<fm_profile::onduty,T,C>::_seq{};
+
