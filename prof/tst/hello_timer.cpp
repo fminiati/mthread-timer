@@ -1,6 +1,5 @@
-# Test your timer using default template parameters
-#
-
+// Test your timer using default template parameters
+//
 #include <iostream>
 #include <thread>
 #include "Timer.h"

@@ -1,6 +1,6 @@
-# Test destructor-call sequence. Specifically check that Timer<>'s destructor
-# gets called last within scope, as you would expect (from stack unwindind).
-
+// Test destructor-call sequence. Specifically check that Timer<>'s destructor
+// gets called last within scope, as you would expect (from stack unwindind).
+//
 #include <iostream>
 #include <thread>
 #include "Timer.h"
