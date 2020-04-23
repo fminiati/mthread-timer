@@ -1,4 +1,15 @@
-// simple timer obj
+// F. Miniati
+// Timer.h: a simple templated instrument to time code execution.
+// Timer measure number of funciton calls and their total duration using templated
+// parameter type I and R defaulted to size_t and std::chrono::duration<double>.
+// Time intervals are measured with a clock of template type Clock, which defaults
+// to std::chrono::high_resolution_clock type.
+// A measurement starts at Timer's construction and stops+ is recorded as Timer
+// goes out of scope, unless the stop() function has already been called.
+// A granularity template parameter allows to switch on and off Timers for
+// progressively lighter scopes of code.
+// Measurements are recorded on a static unique_map, so all Timers record in the same object.
+//
 #include <string>
 #include <iostream>
 #include <iomanip>
