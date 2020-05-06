@@ -9,6 +9,11 @@
 // A granularity template parameter allows to switch on and off Timers for
 // progressively lighter scopes of code.
 // Measurements are recorded on a static unique_map, so all Timers record in the same object.
+// Timers' name tags are appended to a static string so that embedded functions calls 
+// with the deisred granularity level can be traced to measure their footprint on the 
+// calling function performance.
+//
+// to use compile with: -DUSETIME[=TIMER_GRANULARITY]
 //
 #include <string>
 #include <iostream>
@@ -22,8 +27,10 @@
 
 namespace fm_profile {
 
-#ifndef _TMR_GRANULARITY_
-#define _TMR_GRANULARITY_ 0
+#ifdef USE_TIMER
+constexpr unsigned TimerGranularityLim{1+USE_TIMER};
+#else
+constexpr unsigned TimerGranularityLim{0};
 #endif
 
     // time record
@@ -35,16 +42,16 @@ namespace fm_profile {
 
     // use granulrity param to define when timer is onduty 
     constexpr bool onduty{true};
-    constexpr bool OnDuty(const int g) {return _TMR_GRANULARITY_>=g;}
+    constexpr bool OnDuty(const unsigned g) {return g<TimerGranularityLim;}
 
-    // use alias to select on/off duty based on input granularity
+    // use alias template to select on/off duty based on input granularity
     template <bool B, typename T, typename Clock> class Timer;
-    template <int Granularity=1,
+    template <unsigned Granularity=1,
 	     typename T=TimeRecord<>, 
 	     typename Clock=std::chrono::high_resolution_clock>
     using Timer_t = Timer<OnDuty(Granularity),T,Clock>;
 
-    // default timer is off duty
+    // default timer does nothing because it is off duty
     template <bool B, typename T, typename Clock> class Timer {
     public:
 	    Timer(const std::string a_name) {}
@@ -123,7 +130,8 @@ namespace fm_profile {
              if (tot>0) {
 		        std::cout << std::string(ts,' ') << std::left << std::setfill('.')
                 << std::setw(NFW-1) << name << ":" << tab
-                << std::setw(DFW) << std::setfill(' ') << std::scientific << std::setprecision(4) << rec._dur.count() << tab
+                << std::setw(PFW) << std::setfill(' ') << _cnt_string(PFW,std::to_string(rec._cnt)) << tab
+                << std::setw(DFW) << std::scientific << std::setprecision(4) << rec._dur.count() << tab 
                 << std::setw(PFW) << std::defaultfloat << rec._dur.count()/tot << tab
                 << std::setw(PFW) << rec._dur.count()/root.second._dur.count() <<"\n";
              }
@@ -133,7 +141,7 @@ namespace fm_profile {
                  << ", time: "<< std::scientific << rec._dur.count() << " s\n"
                  << std::string(CW,'-') << "\n";
                  std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-"+std::to_string(ts/tabsize)
-                 << _cnt_string(NFW,"name") << tab << _cnt_string(DFW,"time[s]") << tab 
+                 << _cnt_string(NFW,"name") << tab << _cnt_string(PFW,"call-cnt") << tab << _cnt_string(DFW,"time[s]") << tab 
                  << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]") << "\n";
              }
         };
