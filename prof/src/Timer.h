@@ -26,7 +26,6 @@
 #include <utility>
 #include <functional>
 #include <atomic>
-#include <cstring>
 #include <cassert>
 #include <cmath>
 
