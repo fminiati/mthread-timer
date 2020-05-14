@@ -334,18 +334,15 @@ namespace fm_profile {
         // fat lambda that helps printing individual measurements
         auto prnt_rec=[indent=a_level*tabsize](const auto name, const auto rec, const auto es_cnt) {
 
+            using namespace std::string_literals;
+
             // formatting width sizes
             constexpr int NFW{14}, DFW{10}, PFW{10}, CW{80}, TW{2};
             const int RFW{std::max(PFW,4+(int)root.first.size())};
 
             // formatting string output
             auto _cnt_string=[](const auto w, const auto s) {
-                auto s2{0};
-                if constexpr (std::is_same_v<decltype(s),const std::string>) {
-                    s2=(w-std::size(s))/2;
-                } else {
-                    s2=(w-std::strlen(s))/2;
-                }
+                const auto s2=(w-std::size(s))/2;
                 return std::string(s2,' ')+s+std::string(s2,' ');
             };
 
@@ -379,11 +376,11 @@ namespace fm_profile {
                 << name << ": call-cnt: " << rec._count
                 << ", time: "<< std::scientific << rec._duration.count() << " s\n"
                 << std::string(CW,'-') << "\n";
-                td::cout << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
-                << _cnt_string(NFW,"name") << tab << _cnt_string(PFW,"call-cnt") << tab << _cnt_string(DFW,"time[s]") << tab
-                << _cnt_string(PFW,"t/t_caller") << tab << _cnt_string(RFW,"t/t_"+root.first);
+                std::cout << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
+                << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"time[s]"s) << tab
+                << _cnt_string(PFW,"t/t_caller"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
                 if constexpr (MeasureTimerOverHead)
-                    std::cout << tab << _cnt_string(PFW,"tmr-ohd[s]") << tab << _cnt_string(PFW,"t/t_callee");
+                    std::cout << tab << _cnt_string(PFW,"tmr-ohd[s]"s) << tab << _cnt_string(PFW,"t/t_callee"s);
                 std::cout<<"\n";
                  if constexpr (ComputeStats) {
                      std::cout << tab << _cnt_string(PFW,"t[s]/cnt") << tab << _cnt_string(PFW,"t_rms[s]")
