@@ -1,6 +1,6 @@
 // F. Miniati
 // Timer.h: a simple templated instrument to time code execution.
-// Timer measures the number of funciton calls and their total duration using templated
+// Timer measures the number of function calls and their total duration using templated
 // parameter type I and R defaulted to size_t and std::chrono::duration<double>.
 // Time intervals are measured with a clock of template type Clock, which defaults
 // to std::chrono::high_resolution_clock type.
@@ -13,8 +13,7 @@
 // with the desired level of granularity can be traced to measure their footprint on the
 // calling function performance.
 //
-// to use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] -DTHREAD_COUNT[=NUM_THREADS] \
-//                      -DTIMER_OVERHEAD -DTIMER_STATS
+// to use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] -DTIMER_OVERHEAD -DTIMER_STATS -DMULTI_THREAD
 //
 #include <string>
 #include <iostream>
@@ -46,15 +45,11 @@ namespace fm_profile {
     #endif
 
 
-    #ifdef THREAD_COUNT
-    constexpr unsigned ThreadCount{THREAD_COUNT};
-    #endif
-
     // time record
     template <typename I=size_t, typename R=double>
     struct TimeRecord {
         I _count; // number of calls
-        std::chrono::duration<R> _duration; // calls duratio
+        std::chrono::duration<R> _duration; // calls duration
         std::chrono::duration<R> _overhead; // measurements overhad
 #ifdef TIMER_STATS
         struct { R _rms, _max; } _stats{};
@@ -76,34 +71,34 @@ namespace fm_profile {
     template <typename T> using register_record_t= typename time_register_type_traits<T>::record_t;
 
 
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
     // In multithread case, different threads write conncurrently to a pool of Registers,
     // arranged in a static array. Threads' access to Registers is controlled by atomic_gates
-    // which enforce atomicity of RMW operations. Upon request the GateKeeper searches for a
+    // which enforce atomicity of RMW operations. Upon request the AtomicGates searches for a
     // free gate (a hash function converts thread_id to an index, which is then incremented till
     // it reaches a free gate) and returns the array index of the corrensponding Register.
     // Based on simple tests, performance remains negligibly affected by collisions up to a
     // load factors < 70%. Hence, we use about 40% more Registers/Gates than threads.
-    constexpr unsigned RegisterCount{1+static_cast<unsigned>(std::floor(ThreadCount/0.7))};
 
     // wait-free utility to manage atomic access to Registers by threads in multi-thread case
-    template <typename Key, unsigned GateCount, typename Hash=std::hash<Key>>
-    struct AtomicGatesKeeper {
+    template <typename Key=std::thread::id, typename Hash=std::hash<Key>>
+    struct AtomicGates {
 
         // find a free gate, lock it and return its index
         auto lock_gate(Key&& a_key) {
-            assert(_free_gates.fetch_sub(1,std::memory_order_acq_rel)>0);
+            assert(_gates.size()>0 && _free_gates.fetch_sub(1,std::memory_order_acq_rel)>0);
 
-            auto gid = Hash{}(std::move(a_key)) % GateCount;
+            const auto gate_count{_gates.size()};
+            auto gid = Hash{}(std::move(a_key)) % gate_count;
             while (_gates[gid].test_and_set(std::memory_order_acquire))
-                ++gid %= GateCount;
+                ++gid %= gate_count;
 
             return gid;
         }
 
         // free locked gate
         void free_gate(const auto a_gid) {
-            assert(_free_gates.fetch_add(1,std::memory_order_acq_rel)>=0);
+            assert(a_gid<_gates.size() && _free_gates.fetch_add(1,std::memory_order_acq_rel)>=0);
 
             _gates[a_gid].clear(std::memory_order_release);
         }
@@ -121,32 +116,49 @@ namespace fm_profile {
             for (auto& g : _gates) g.clear(std::memory_order_release);
         }
 
-        // std::atomic_flag initialised
+        // use thread count to set up atomic gates, return gate count
+        static auto setup_gates(const auto a_thread_count) {
+            assert(a_thread_count>0 && !_gates.size()==0);
+
+            // set gate count large enough for efficiet allocation of atomic access
+            // to registers (see comment above)
+            const auto gate_count=1+static_cast<unsigned>(std::floor(a_thread_count/0.7));
+
+            // ugly but necessary...
+            std::vector<atomic_gate> v(gate_count); _gates.swap(v);
+            // initialise number of free gates
+            _free_gates.store(gate_count,std::memory_order_release);
+
+            return gate_count;
+        }
+
+        // std::atomic_flag initialised (waiting for c++20)
         struct atomic_gate : public std::atomic_flag {
             atomic_gate() : std::atomic_flag{ATOMIC_FLAG_INIT} {}
         };
 
         private:
-        static std::array<atomic_gate,GateCount> _gates;
+        static std::vector<atomic_gate> _gates;
         static std::atomic<int> _free_gates;
     };
+#else
+    template <typename V=void> using AtomicGates=void;
 #endif
-
 
     // use granulrity param to define when timer is onduty 
     constexpr bool OnDuty(const unsigned g) {return g<TimerGranularityLim;}
 
     // use alias template to set Timer on/off duty based on input granularity
-    template <bool B, typename R, typename C> class Timer;
+    template <bool B, typename R, typename C, typename A> class Timer;
 
     template <unsigned Granularity=1,
               typename Register=TimeRegister<>,
-              typename Clock=std::chrono::high_resolution_clock>
-    using Timer_t = Timer<OnDuty(Granularity),Register,Clock>;
-
+              typename Clock=std::chrono::high_resolution_clock,
+              typename AtomicMapper=AtomicGates<>>
+    using Timer_t = Timer<OnDuty(Granularity),Register,Clock,AtomicMapper>;
 
     // default timer does nothing because it is off duty
-    template <bool B, typename R, typename C> class Timer {
+    template <bool B, typename R, typename C, typename A> class Timer {
         public:
         Timer(const std::string a_name) {}
 	    void stop() {}
@@ -156,20 +168,15 @@ namespace fm_profile {
 
     // timer measures when on duty
     constexpr bool onduty{true};
-    template <typename Register, typename Clock> class Timer<onduty,Register,Clock> {
+    template <typename Register, typename Clock, typename AtomicMapper>
+    class Timer<onduty,Register,Clock,AtomicMapper> {
 
-        // print out measurements
-	    void static print_record(const register_label_t<Register> a_record_label,
-                                 const register_record_t<Register>& a_record,
-                                 const Register& a_register,
-                                 const unsigned a_level);
-
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
         // measurementes are stored in stratic registers;
-        static std::array<Register,RegisterCount> _registers;
+        static std::vector<Register> _registers;
 
-        // manages atomic access to array of register
-        AtomicGatesKeeper<std::thread::id,RegisterCount> _gates_keeper{};
+        // manages atomic access, hence gates, to array of register
+        AtomicMapper _gates_keeper{};
 
         // thread local static variables
         thread_local static unsigned _register_gate;
@@ -192,7 +199,7 @@ namespace fm_profile {
             // measure timer overhead
             if constexpr (MeasureTimerOverHead) _t_up=Clock::now();
 
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
             // first thread timer opens gate to a register
             if (_thread_timer_cnt==0)
                 _register_gate=_gates_keeper.lock_gate(std::this_thread::get_id());
@@ -232,7 +239,7 @@ namespace fm_profile {
             _stop=false;
 
             // get records...
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
             auto& [count,duration,overhead]=_registers[_register_gate][_call_sequence];
 #else
             auto& [count,duration,overhead]=_register[_call_sequence];
@@ -248,7 +255,7 @@ namespace fm_profile {
                 t_rms += dt*dt;
                 t_max = std::max(t_max,dt);
             }
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
             // final book-keeping: free gate if this thread no more uses it
             if (--_thread_timer_cnt==0)
                 _gates_keeper.free_gate(_register_gate);
@@ -257,7 +264,18 @@ namespace fm_profile {
             if constexpr (MeasureTimerOverHead) overhead += Clock::now()-t_dw;
         }
 
-#ifdef THREAD_COUNT
+#ifdef MULTI_THREAD
+        // thread count is not used except for setting the register count
+        static void set_thread_count(const auto a_thread_count) {
+            assert(a_thread_count>0 && _registers.size()==0);
+
+            // initialize keeper and get register count = gate count
+            const auto register_count = AtomicMapper::setup_gates(a_thread_count);
+
+            // resize register
+            _registers.resize(register_count);
+        };
+
         // consolidate threads records into single printable record:
         // this function may need differerntiate depending on application, so there will be
         // a default version and the possibility for the user to override it.
@@ -290,7 +308,8 @@ namespace fm_profile {
                }
             }
         } _consolidate;
-        using f_consolidate_t=std::function<void(Register&,std::array<Register,RegisterCount>)>;
+
+        using f_consolidate_t=std::function<void(Register&,std::vector<Register>)>;
 #else
         static struct { void operator()() {} } _consolidate;
         using f_consolidate_t=std::function<void()>;
@@ -299,13 +318,13 @@ namespace fm_profile {
         // print out measurements
         static void print_record(f_consolidate_t a_consolidate_records=_consolidate) {
 
-#ifndef THREAD_COUNT
+#ifndef MULTI_THREAD
             // now print out records
             print_record("",{},_register,0);
 #else
             // freeze access to registers during print out
             // this implies waiting till all Timers are done recording
-            AtomicGatesKeeper<std::thread::id,RegisterCount>::lock_all_gates();
+            AtomicMapper::lock_all_gates();
 
             // use a_consolidate input function to consolidate thread's records
             Register full_record{};
@@ -315,25 +334,32 @@ namespace fm_profile {
             print_record("",{},full_record,0);
 
             // free access to all registers
-            AtomicGatesKeeper<std::thread::id,RegisterCount>::free_all_gates();
+            AtomicMapper::free_all_gates();
 #endif
         }
+ 
+        // print out measurements
+	    static void print_record(const register_label_t<Register> a_record_label,
+                                 const register_record_t<Register>& a_record,
+                                 const Register& a_register,
+                                 const unsigned a_level);
     };
 
-    template <typename Register, typename C>
-	void Timer<onduty,Register,C>::print_record(const register_label_t<Register> a_record_label,
-                                                const register_record_t<Register>& a_record,
-                                                const Register& a_register,
-                                                const unsigned a_level) {
-        constexpr auto tabsize{3};
+    template <typename Register, typename C, typename A>
+	void Timer<onduty,Register,C,A>::print_record(const register_label_t<Register> a_record_label,
+                                                  const register_record_t<Register>& a_record,
+                                                  const Register& a_register,
+                                                  const unsigned a_level) {
 
         // declare static root Timer set to zero-level Timer's
         static std::pair<register_label_t<Register>,register_record_t<Register>> root;
 
         // fat lambda that helps printing individual measurements
-        auto prnt_rec=[indent=a_level*tabsize](const auto name, const auto rec, const auto es_cnt) {
+        auto prnt_rec=[a_level](const auto name, const auto rec, const auto es_cnt) {
 
             using namespace std::string_literals;
+            constexpr auto tabsize{3};
+            const auto indent=a_level*tabsize;
 
             // formatting width sizes
             constexpr int NFW{14}, DFW{10}, PFW{10}, CW{80}, TW{2};
@@ -434,26 +460,25 @@ namespace fm_profile {
         if (a_level==0) std::cout<<std::string(80,'-')<<"\n";
     }
 
-
-    template <typename T, typename C>
-    thread_local register_label_t<T> Timer<onduty,T,C>::_call_sequence;
-#ifdef THREAD_COUNT
-    template <typename K, unsigned N, typename H>
-    std::array<typename AtomicGatesKeeper<K,N,H>::atomic_gate,N>
-    AtomicGatesKeeper<K,N,H>::_gates{};
-
-    template <typename T, typename C>
-    thread_local unsigned Timer<onduty,T,C>::_register_gate{};
-
-    template <typename K, unsigned N, typename H>
-    std::atomic<int> AtomicGatesKeeper<K,N,H>::_free_gates{N};
-
-    template <typename T, typename C>
-    thread_local unsigned Timer<onduty,T,C>::_thread_timer_cnt{0};
-
-    template <typename T, typename C>
-    std::array<T,RegisterCount> Timer<onduty,T,C>::_registers{};
+    template <typename T, typename C, typename A>
+    thread_local register_label_t<T> Timer<onduty,T,C,A>::_call_sequence{};
+#ifndef MULTI_THREAD
+    template <typename T, typename C, typename A>
+    T Timer<onduty,T,C,A>::_register{};
 #else
-    template <typename T, typename C> T Timer<onduty,T,C>::_register{};
+    template <typename T, typename C, typename A>
+    std::vector<T> Timer<onduty,T,C,A>::_registers{};
+
+    template <typename T, typename C, typename A>
+    thread_local unsigned Timer<onduty,T,C,A>::_register_gate{};
+
+    template <typename T, typename C, typename A>
+    thread_local unsigned Timer<onduty,T,C,A>::_thread_timer_cnt{0};
+
+    template <typename K, typename H>
+    std::vector<typename AtomicGates<K,H>::atomic_gate> AtomicGates<K,H>::_gates{};
+
+    template <typename K, typename H>
+    std::atomic<int> AtomicGates<K,H>::_free_gates{};
 #endif
 };
