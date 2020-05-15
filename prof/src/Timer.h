@@ -13,7 +13,7 @@
 // with the deisred granularity level can be traced to measure their footprint on the 
 // calling function performance.
 //
-// to use compile with: -DUSETIME[=TIMER_GRANULARITY]
+// to use compile with: -DUSETIME[=TIMER_GRANULARITY] -DTIMER_STATS
 //
 #include <string>
 #include <iostream>
@@ -24,11 +24,17 @@
 #include <unordered_map>
 #include <utility>
 #include <cstring>
+#include <cmath>
 
 namespace fm_profile {
 
 #ifdef USE_TIMER
 constexpr unsigned TimerGranularityLim{1+USE_TIMER};
+#ifdef TIMER_STATS
+    constexpr bool EnableStats{true};
+#else
+    constexpr bool EnableStats{false};
+#endif
 #else
 constexpr unsigned TimerGranularityLim{0};
 #endif
@@ -38,6 +44,9 @@ constexpr unsigned TimerGranularityLim{0};
     struct TimeRecord {
         I _cnt;
         std::chrono::duration<R> _dur;
+#ifdef TIMER_STATS
+        struct { R _rms{}, _max{}, _min{std::numeric_limits<R>::max()}; } _stats;
+#endif
     };
 
     // use granulrity param to define when timer is onduty 
@@ -86,8 +95,20 @@ constexpr unsigned TimerGranularityLim{0};
 
 	// stop measurement before going out of scope
         void stop() {
+            const auto t_dw= Clock::now();
+            const std::chrono::duration<double> dur=t_dw-_t_up;
             ++_records[_seq]._cnt;
-            _records[_seq]._dur += Clock::now() - _t_up;
+            _records[_seq]._dur += dur;
+
+            if constexpr (EnableStats) {
+                const auto dt=dur.count();
+                std::cout << " dt="<<dt<<'\n';
+                auto& [t_rms,t_max,t_min]=_records[_seq]._stats;
+                t_rms += dt*dt;
+                t_max = std::max(t_max,dt);
+                t_min = std::min(t_min,dt);
+            }
+
             _seq.resize(_seq.size()-_name.size());
             _stop=false;
         }
@@ -133,7 +154,18 @@ constexpr unsigned TimerGranularityLim{0};
                 << std::setw(PFW) << std::setfill(' ') << _cnt_string(PFW,std::to_string(rec._cnt)) << tab
                 << std::setw(DFW) << std::scientific << std::setprecision(4) << rec._dur.count() << tab 
                 << std::setw(PFW) << std::defaultfloat << rec._dur.count()/tot << tab
-                << std::setw(PFW) << rec._dur.count()/root.second._dur.count() <<"\n";
+                << std::setw(PFW) << rec._dur.count()/root.second._dur.count();
+                if constexpr (EnableStats) {
+                    if (name!="total") {
+                        const auto t_ave=rec._dur.count()/rec._cnt;
+                        const auto t_rms=(rec._cnt>0 ? std::sqrt(rec._stats._rms/rec._cnt-t_ave*t_ave) : 0);
+
+                        std::cout << std::scientific << std::setprecision(3) 
+                                  << std::setw(PFW) << t_ave << tab << std::setw(PFW) << t_rms << tab
+                                  << std::setw(PFW) << rec._stats._max << tab << std::setw(PFW) << rec._stats._min;
+                    }
+                }
+                std::cout <<"\n";
              }
              else {
                  std::cout << std::string(CW,'=') << "\n"
@@ -141,8 +173,13 @@ constexpr unsigned TimerGranularityLim{0};
                  << ", time: "<< std::scientific << rec._dur.count() << " s\n"
                  << std::string(CW,'-') << "\n";
                  std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-"+std::to_string(ts/tabsize)
-                 << _cnt_string(NFW,"name") << tab << _cnt_string(PFW,"call-cnt") << tab << _cnt_string(DFW,"time[s]") << tab 
-                 << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]") << "\n";
+                 << _cnt_string(NFW,"name") << tab << _cnt_string(PFW,"call-cnt") << tab << _cnt_string(DFW,"t[s]") << tab 
+                 << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]");
+                 if constexpr (EnableStats) {
+                     std::cout << tab << _cnt_string(PFW,"t[s]/cnt") << tab << _cnt_string(PFW,"t_rms[s]")
+                               << tab << _cnt_string(PFW,"t_max[s]") << tab << _cnt_string(PFW,"t_min[s]");
+                 }
+                 std::cout << "\n";
              }
         };
 	if (_records.size()==1) {
