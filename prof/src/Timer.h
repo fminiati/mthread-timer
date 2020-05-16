@@ -31,9 +31,9 @@ namespace fm_profile {
 #ifdef USE_TIMER
 constexpr unsigned TimerGranularityLim{1+USE_TIMER};
 #ifdef TIMER_STATS
-    constexpr bool EnableStats{true};
+    constexpr bool ComputeStats{true};
 #else
-    constexpr bool EnableStats{false};
+    constexpr bool ComputeStats{false};
 #endif
 #else
 constexpr unsigned TimerGranularityLim{0};
@@ -45,7 +45,7 @@ constexpr unsigned TimerGranularityLim{0};
         I _cnt;
         std::chrono::duration<R> _dur;
 #ifdef TIMER_STATS
-        struct { R _rms{}, _max{}, _min{std::numeric_limits<R>::max()}; } _stats;
+        struct { R _rms, _max; } _stats{};
 #endif
     };
 
@@ -100,13 +100,11 @@ constexpr unsigned TimerGranularityLim{0};
             ++_records[_seq]._cnt;
             _records[_seq]._dur += dur;
 
-            if constexpr (EnableStats) {
+            if constexpr (ComputeStats) {
                 const auto dt=dur.count();
-                std::cout << " dt="<<dt<<'\n';
-                auto& [t_rms,t_max,t_min]=_records[_seq]._stats;
+                auto& [t_rms,t_max]=_records[_seq]._stats;
                 t_rms += dt*dt;
                 t_max = std::max(t_max,dt);
-                t_min = std::min(t_min,dt);
             }
 
             _seq.resize(_seq.size()-_name.size());
@@ -134,7 +132,7 @@ constexpr unsigned TimerGranularityLim{0};
         }
         std::sort(recs.begin(),recs.end(),[](const auto& a, const auto& b){return a.second._dur>b.second._dur;});
 
-        auto prnt_rec=[ts](const auto name, const auto rec, const auto tot) {
+        auto prnt_rec=[ts](const auto name, const auto rec, const auto es_cnt) {
 
             constexpr int NFW=14, DFW=10, PFW=8, CW=80, TW=2;
 	    auto _cnt_string=[](const auto w, const auto s) {
@@ -148,21 +146,20 @@ constexpr unsigned TimerGranularityLim{0};
             };
 
 	    const std::string tab(TW,' ');
-             if (tot>0) {
+             if (es_cnt>0) {
 		        std::cout << std::string(ts,' ') << std::left << std::setfill('.')
                 << std::setw(NFW-1) << name << ":" << tab
                 << std::setw(PFW) << std::setfill(' ') << _cnt_string(PFW,std::to_string(rec._cnt)) << tab
                 << std::setw(DFW) << std::scientific << std::setprecision(4) << rec._dur.count() << tab 
-                << std::setw(PFW) << std::defaultfloat << rec._dur.count()/tot << tab
+                << std::setw(PFW) << std::defaultfloat << rec._dur.count()/es_cnt << tab
                 << std::setw(PFW) << rec._dur.count()/root.second._dur.count();
-                if constexpr (EnableStats) {
+                if constexpr (ComputeStats) {
                     if (name!="total") {
-                        const auto t_ave=rec._dur.count()/rec._cnt;
-                        const auto t_rms=(rec._cnt>0 ? std::sqrt(rec._stats._rms/rec._cnt-t_ave*t_ave) : 0);
-
-                        std::cout << std::scientific << std::setprecision(3) 
-                                  << std::setw(PFW) << t_ave << tab << std::setw(PFW) << t_rms << tab
-                                  << std::setw(PFW) << rec._stats._max << tab << std::setw(PFW) << rec._stats._min;
+                        const auto t_ave = rec._dur.count()/rec._cnt;
+                        const auto t_rms = std::sqrt(rec._stats._rms/rec._cnt-t_ave*t_ave);
+                        std::cout << std::scientific << std::setprecision(3)
+                                << std::setw(PFW) << t_ave << tab << std::setw(PFW) << t_rms << tab
+                                << std::setw(PFW) << rec._stats._max;
                     }
                 }
                 std::cout <<"\n";
@@ -175,9 +172,9 @@ constexpr unsigned TimerGranularityLim{0};
                  std::cout << std::setw(ts) << std::setfill(' ') << std::left << "L-"+std::to_string(ts/tabsize)
                  << _cnt_string(NFW,"name") << tab << _cnt_string(PFW,"call-cnt") << tab << _cnt_string(DFW,"t[s]") << tab 
                  << _cnt_string(PFW,"% ") << tab << _cnt_string(PFW,"%["+root.first+"]");
-                 if constexpr (EnableStats) {
+                 if constexpr (ComputeStats) {
                      std::cout << tab << _cnt_string(PFW,"t[s]/cnt") << tab << _cnt_string(PFW,"t_rms[s]")
-                               << tab << _cnt_string(PFW,"t_max[s]") << tab << _cnt_string(PFW,"t_min[s]");
+                               << tab << _cnt_string(PFW,"t_max[s]");
                  }
                  std::cout << "\n";
              }
@@ -194,8 +191,11 @@ constexpr unsigned TimerGranularityLim{0};
 
             // print finer timer-mesurementes and total
             T total{};
+
+            // make a copy so you can first work the stats out
             for (const auto& [name,rec] : recs) {
                 prnt_rec (name,rec,a_tr._dur.count());
+
                 total._cnt+=rec._cnt;
                 total._dur+=rec._dur;
             }
