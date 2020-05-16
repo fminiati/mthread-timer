@@ -28,7 +28,8 @@
 #include <cassert>
 #include <cmath>
 
-namespace fm_profile {
+namespace fm {
+    namespace profiling {
 
     #ifdef USE_TIMER
     constexpr unsigned TimerGranularityLim{1+USE_TIMER};
@@ -501,4 +502,5 @@ namespace fm_profile {
     template <typename K, typename H>
     std::atomic<int> AtomicGates<K,H>::_free_gates{};
 #endif
+    };
 };
