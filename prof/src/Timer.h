@@ -33,12 +33,14 @@ namespace fm_profile {
     #ifdef USE_TIMER
     constexpr unsigned TimerGranularityLim{1+USE_TIMER};
     #ifdef TIMER_OVERHEAD
-        constexpr bool MeasureTimerOverHead{true};
+        constexpr bool TimerOverHead{true};
+    #else
+        constexpr bool TimerOverHead{false};
     #endif
     #ifdef TIMER_STATS
-        constexpr bool ComputeStats{true};
+        constexpr bool TimerStats{true};
     #else
-        constexpr bool ComputeStats{false};
+        constexpr bool TimerStats{false};
     #endif
     #else
     constexpr unsigned TimerGranularityLim{0};
@@ -50,11 +52,20 @@ namespace fm_profile {
     struct TimeRecord {
         I _count; // number of calls
         std::chrono::duration<R> _duration; // calls duration
+#ifdef TIMER_OVERHEAD
         std::chrono::duration<R> _overhead; // measurements overhad
+#endif
 #ifdef TIMER_STATS
         struct { R _rms, _max; } _stats{};
 #endif
     };
+    template <typename T> struct time_record_type_traits {};
+    template <typename I, typename R> struct time_record_type_traits<TimeRecord<I,R>> {
+        using cnt_t =I;
+        using rep_t =R;
+    };
+    template <typename T> using record_cnt_t = typename time_record_type_traits<T>::cnt_t;
+    template <typename T> using record_rep_t = typename time_record_type_traits<T>::rep_t;
 
 
     // register for time records: map measurements to identifiers
@@ -62,8 +73,7 @@ namespace fm_profile {
     using TimeRegister = Map<Label,Record>;
 
     template <typename T> struct time_register_type_traits {};
-    template <typename Record, typename Label>
-    struct time_register_type_traits<TimeRegister<Record,Label>> {
+    template <typename Record, typename Label> struct time_register_type_traits<TimeRegister<Record,Label>> {
         using label_t =Label;
         using record_t=Record;
     };
@@ -118,7 +128,7 @@ namespace fm_profile {
 
         // use thread count to set up atomic gates, return gate count
         static auto setup_gates(const auto a_thread_count) {
-            assert(a_thread_count>0 && !_gates.size()==0);
+            assert(a_thread_count>0 && _gates.size()==0);
 
             // set gate count large enough for efficiet allocation of atomic access
             // to registers (see comment above)
@@ -197,7 +207,7 @@ namespace fm_profile {
         Timer(const std::string a_name) {
 
             // measure timer overhead
-            if constexpr (MeasureTimerOverHead) _t_up=Clock::now();
+            if constexpr (TimerOverHead) _t_up=Clock::now();
 
 #ifdef MULTI_THREAD
             // first thread timer opens gate to a register
@@ -216,7 +226,7 @@ namespace fm_profile {
             _call_sequence+=_name;
 
             // measure timer overhead
-            if constexpr (MeasureTimerOverHead)
+            if constexpr (TimerOverHead)
                _register[_call_sequence]._overhead += Clock::now()-_t_up;
 
             // timer starts
@@ -234,34 +244,37 @@ namespace fm_profile {
 
             // stop timer
             const auto t_dw=Clock::now();
+            const std::chrono::duration<record_rep_t<register_record_t<Register>>> duration=t_dw-_t_up;
 
             // invalidate destructor call to this function
             _stop=false;
 
-            // get records...
+            // get the record...
 #ifdef MULTI_THREAD
-            auto& [count,duration,overhead]=_registers[_register_gate][_call_sequence];
+            auto& record=_registers[_register_gate][_call_sequence];
 #else
-            auto& [count,duration,overhead]=_register[_call_sequence];
+            auto& record=_register[_call_sequence];
 #endif
-            // ... update them
-            ++count;
-            duration += t_dw-_t_up;
-            _call_sequence.resize(_call_sequence.size()-_name.size());
+            // ... update it
+            ++record._count;
+            record._duration += duration;
 
-            if constexpr (ComputeStats) {
-                const auto dt=(t_dw-_t_up).count();
-                auto& [t_rms,t_max]=_records[_seq]._stats;
+            if constexpr (TimerStats) {
+                auto& [t_rms,t_max]=record._stats;
+                const auto dt=duration.count();
                 t_rms += dt*dt;
                 t_max = std::max(t_max,dt);
             }
+
+            _call_sequence.resize(_call_sequence.size()-_name.size());
+
 #ifdef MULTI_THREAD
             // final book-keeping: free gate if this thread no more uses it
             if (--_thread_timer_cnt==0)
                 _gates_keeper.free_gate(_register_gate);
 #endif
             // measure timer overhead
-            if constexpr (MeasureTimerOverHead) overhead += Clock::now()-t_dw;
+            if constexpr (TimerOverHead) record._overhead += Clock::now()-t_dw;
         }
 
 #ifdef MULTI_THREAD
@@ -295,11 +308,16 @@ namespace fm_profile {
                        // search for same record-labels in successive records
                        for (auto th_rit{r_it+1}; th_rit!=last; ++th_rit) {
                            // if you find consolidate into current record
-                           if (const auto& th_record=th_rit->extract(label); !th_record.empty()) {
-                               const auto& [th_cnt,th_dur,th_ohd]=th_record.mapped();
-                               record._count   +=th_cnt;
-                               record._duration+=th_dur;
-                               record._overhead+=th_ohd;
+                           if (const auto& th_node=th_rit->extract(label); !th_node.empty()) {
+                               const auto& th_record=th_node.mapped();
+                               record._count   +=th_record._count;
+                               record._duration+=th_record._duration;
+                               if constexpr (TimerOverHead)
+                                   record._overhead+=th_record._overhead;
+                               if constexpr (TimerStats) {
+                                   record._stats._rms+=th_record._stats._rms;
+                                   record._stats._max+=(record._stats._max,th_record._stats._max);
+                               }
                            }
                        }
                    }
@@ -355,7 +373,7 @@ namespace fm_profile {
         static std::pair<register_label_t<Register>,register_record_t<Register>> root;
 
         // fat lambda that helps printing individual measurements
-        auto prnt_rec=[a_level](const auto name, const auto rec, const auto es_cnt) {
+        auto prnt_rec=[a_level](const auto name, const auto rec, const auto es_count) {
 
             using namespace std::string_literals;
             constexpr auto tabsize{3};
@@ -373,24 +391,23 @@ namespace fm_profile {
 
             // here print out a single nested timer measurement
             const std::string tab(TW,' ');
-            if (es_cnt>0) {
+            if (es_count>0) {
                 std::cout << std::string(indent,' ') << std::left << std::setfill('.')
                 << std::setw(NFW-1) << name << ":" << tab
                 << std::setw(PFW) << std::setfill(' ') << _cnt_string(PFW,std::to_string(rec._count)) << tab
                 << std::setw(DFW) << std::scientific << std::setprecision(3) << rec._duration.count() << tab
-                << std::setw(PFW) << std::scientific << std::setprecision(2) << rec._duration.count()/es_cnt << tab
+                << std::setw(PFW) << std::scientific << std::setprecision(2) << rec._duration.count()/es_count << tab
                 << std::setw(RFW) << rec._duration.count()/root.second._duration.count();
-                if constexpr (MeasureTimerOverHead) {
-                    std::cout << tab << std::setw(PFW) << std::scientific <<std::setprecision(2) << rec._overhead.count() << tab
-                    << std::setw(PFW) << std::scientific << std::setprecision(2) << rec._overhead.count()/rec._duration.count();
+                if constexpr (TimerOverHead) {
+                    std::cout << tab << std::setw(PFW) << rec._overhead.count() 
+                              << tab << std::setw(PFW) << rec._overhead.count()/rec._duration.count();
                 }
-                if constexpr (ComputeStats) {
+                if constexpr (TimerStats) {
                     if (name!="total") {
-                        const auto t_ave = rec._dur.count()/rec._cnt;
-                        const auto t_rms = std::sqrt(rec._stats._rms/rec._cnt-t_ave*t_ave);
-                        std::cout << std::scientific << std::setprecision(3)
-                                << std::setw(PFW) << t_ave << tab << std::setw(PFW) << t_rms << tab
-                                << std::setw(PFW) << rec._stats._max;
+                        const auto t_ave = rec._duration.count()/rec._count;
+                        const auto t_rms = std::sqrt(rec._stats._rms/rec._count-t_ave*t_ave);
+                        std::cout << tab << std::setw(PFW) << t_ave
+                                  << tab << std::setw(PFW) << t_rms << tab << std::setw(PFW) << rec._stats._max;
                     }
                 }
                 std::cout<<"\n";
@@ -401,16 +418,19 @@ namespace fm_profile {
                 << name << ": call-cnt: " << rec._count
                 << ", time: "<< std::scientific << rec._duration.count() << " s\n"
                 << std::string(CW,'-') << "\n";
+
                 std::cout << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
                 << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"time[s]"s) << tab
                 << _cnt_string(PFW,"t/t_caller"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
-                if constexpr (MeasureTimerOverHead)
+
+                if constexpr (TimerOverHead)
                     std::cout << tab << _cnt_string(PFW,"tmr-ohd[s]"s) << tab << _cnt_string(PFW,"t/t_callee"s);
+
+                if constexpr (TimerStats) {
+                     std::cout << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
+                               << tab << _cnt_string(PFW,"t_max[s]"s);
+                }
                 std::cout<<"\n";
-                 if constexpr (ComputeStats) {
-                     std::cout << tab << _cnt_string(PFW,"t[s]/cnt") << tab << _cnt_string(PFW,"t_rms[s]")
-                               << tab << _cnt_string(PFW,"t_max[s]");
-                 }
             }
         };
 
