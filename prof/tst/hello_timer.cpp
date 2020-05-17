@@ -6,7 +6,7 @@
 
 int main(int argc, char* argv[]) {
     using namespace std::chrono_literals;
-    using namespace fm_profile;
+    using namespace fm::profiling;
 
 	Timer_t<> tmr("main");
 
