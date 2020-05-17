@@ -421,11 +421,11 @@ namespace fm {
                 << std::string(CW,'-') << "\n";
 
                 std::cout << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
-                << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"time[s]"s) << tab
-                << _cnt_string(PFW,"t/t_caller"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
+                << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"t[s]"s) << tab
+                << _cnt_string(PFW,"t/t_en-scp"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
 
                 if constexpr (TimerOverHead)
-                    std::cout << tab << _cnt_string(PFW,"tmr-ohd[s]"s) << tab << _cnt_string(PFW,"t/t_callee"s);
+                    std::cout << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
 
                 if constexpr (TimerStats) {
                      std::cout << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
