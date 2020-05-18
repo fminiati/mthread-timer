@@ -1,0 +1,21 @@
+##
+## input file
+
+# vector size
+vsize = 5
+vector = 12.0 2 3 \  # continue below
+         7.e-80 0.00
+
+#  list
+lsize = 8
+list = 12 3. 44. \ # continue below
+       2 0.1 1.e-8 \ # see below
+       1. \
+       23 
+
+#  array
+array= 1 2 3 4 5 # array elements
+
+     #float
+flt_x = \    # see below
+        3.0  #
