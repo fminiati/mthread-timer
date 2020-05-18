@@ -15,6 +15,10 @@
 //
 // to use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] -DTIMER_OVERHEAD -DTIMER_STATS -DMULTI_THREAD
 //
+
+#ifndef TIMER_H
+#define TIMER_H
+
 #include <string>
 #include <iostream>
 #include <iomanip>
@@ -31,7 +35,7 @@
 namespace fm {
     namespace profiling {
 
-    #ifdef USE_TIMER
+#ifdef USE_TIMER
     constexpr unsigned TimerGranularityLim{1+USE_TIMER};
     #ifdef TIMER_OVERHEAD
         constexpr bool TimerOverHead{true};
@@ -43,9 +47,11 @@ namespace fm {
     #else
         constexpr bool TimerStats{false};
     #endif
-    #else
+#else
     constexpr unsigned TimerGranularityLim{0};
-    #endif
+    constexpr bool     TimerOverHead{false};
+    constexpr bool     TimerStats{false};
+#endif
 
 
     // time record
@@ -74,9 +80,9 @@ namespace fm {
     using TimeRegister = Map<Label,Record>;
 
     template <typename T> struct time_register_type_traits {};
-    template <typename Record, typename Label> struct time_register_type_traits<TimeRegister<Record,Label>> {
-        using label_t =Label;
-        using record_t=Record;
+    template <typename R, typename L> struct time_register_type_traits<TimeRegister<R,L>> {
+        using record_t=R;
+        using label_t =L;
     };
     template <typename T> using register_label_t = typename time_register_type_traits<T>::label_t;
     template <typename T> using register_record_t= typename time_register_type_traits<T>::record_t;
@@ -137,8 +143,10 @@ namespace fm {
 
             // ugly but necessary...
             std::vector<atomic_gate> v(gate_count); _gates.swap(v);
+    #ifndef NDEBUG
             // initialise number of free gates
             _free_gates.store(gate_count,std::memory_order_release);
+    #endif
 
             return gate_count;
         }
@@ -150,11 +158,14 @@ namespace fm {
 
         private:
         static std::vector<atomic_gate> _gates;
+    #ifndef NDEBUG
         static std::atomic<int> _free_gates;
+    #endif
     };
 #else
     template <typename V=void> using AtomicGates=void;
 #endif
+
 
     // use granulrity param to define when timer is onduty 
     constexpr bool OnDuty(const unsigned g) {return g<TimerGranularityLim;}
@@ -168,6 +179,7 @@ namespace fm {
               typename AtomicMapper=AtomicGates<>>
     using Timer_t = Timer<OnDuty(Granularity),Register,Clock,AtomicMapper>;
 
+
     // default timer does nothing because it is off duty
     template <bool B, typename R, typename C, typename A> class Timer {
         public:
@@ -176,6 +188,7 @@ namespace fm {
         static void print_record() {}
         ~Timer() {}
     };
+
 
     // timer measures when on duty
     constexpr bool onduty{true};
@@ -202,6 +215,13 @@ namespace fm {
         std::string _name;
         std::chrono::time_point<Clock> _t_up;
         bool _stop{true};
+
+        // print out measurements
+        static void print_record(const register_label_t<Register> a_record_label,
+                                 const register_record_t<Register>& a_record,
+                                 const Register& a_register,
+                                 const unsigned  a_level,
+                                 std::ostream&   a_ostream);
 
         public:
         // constructor
@@ -236,7 +256,6 @@ namespace fm {
 
         // stop and record measurement at destruction unless !_stop
         ~Timer() {
-
             if (_stop) stop();
         }
 
@@ -327,7 +346,6 @@ namespace fm {
                }
             }
         } _consolidate;
-
         using f_consolidate_t=std::function<void(Register&,std::vector<Register>)>;
 #else
         static struct { void operator()() {} } _consolidate;
@@ -335,11 +353,11 @@ namespace fm {
 #endif
 
         // print out measurements
-        static void print_record(f_consolidate_t a_consolidate_records=_consolidate) {
+        static void print_record(std::ostream& a_ostream=std::cout, f_consolidate_t a_consolidate_records=_consolidate) {
 
 #ifndef MULTI_THREAD
             // now print out records
-            print_record("",{},_register,0);
+            print_record("",{},_register,0,a_ostream);
 #else
             // freeze access to registers during print out
             // this implies waiting till all Timers are done recording
@@ -350,32 +368,28 @@ namespace fm {
             a_consolidate_records(full_record,_registers);
 
             // now print out records
-            print_record("",{},full_record,0);
+            print_record("",{},full_record,0,a_ostream);
 
             // free access to all registers
             AtomicMapper::free_all_gates();
 #endif
         }
- 
-        // print out measurements
-	    static void print_record(const register_label_t<Register> a_record_label,
-                                 const register_record_t<Register>& a_record,
-                                 const Register& a_register,
-                                 const unsigned a_level);
     };
 
     template <typename Register, typename C, typename A>
 	void Timer<onduty,Register,C,A>::print_record(const register_label_t<Register> a_record_label,
                                                   const register_record_t<Register>& a_record,
                                                   const Register& a_register,
-                                                  const unsigned a_level) {
+                                                  const unsigned  a_level,
+                                                  std::ostream&   a_ostream) {
 
         // declare static root Timer set to zero-level Timer's
         static std::pair<register_label_t<Register>,register_record_t<Register>> root;
 
         // fat lambda that helps printing individual measurements
-        auto prnt_rec=[a_level](const auto name, const auto rec, const auto es_count) {
+        auto prnt_rec=[&a_ostream,a_level](const auto name, const auto rec, const auto es_count) {
 
+            // useful scope and constants
             using namespace std::string_literals;
             constexpr auto tabsize{3};
             const auto indent=a_level*tabsize;
@@ -393,62 +407,61 @@ namespace fm {
             // here print out a single nested timer measurement
             const std::string tab(TW,' ');
             if (es_count>0) {
-                std::cout << std::string(indent,' ') << std::left << std::setfill('.')
+                a_ostream << std::string(indent,' ') << std::left << std::setfill('.')
                 << std::setw(NFW-1) << name << ":" << tab
                 << std::setw(PFW) << std::setfill(' ') << _cnt_string(PFW,std::to_string(rec._count)) << tab
                 << std::setw(DFW) << std::scientific << std::setprecision(3) << rec._duration.count() << tab
                 << std::setw(PFW) << std::scientific << std::setprecision(2) << rec._duration.count()/es_count << tab
                 << std::setw(RFW) << rec._duration.count()/root.second._duration.count();
                 if constexpr (TimerOverHead) {
-                    std::cout << tab << std::setw(PFW) << rec._overhead.count() 
+                    a_ostream << tab << std::setw(PFW) << rec._overhead.count()
                               << tab << std::setw(PFW) << rec._overhead.count()/rec._duration.count();
                 }
                 if constexpr (TimerStats) {
                     if (name!="total") {
                         const auto t_ave = rec._duration.count()/rec._count;
                         const auto t_rms = std::sqrt(rec._stats._rms/rec._count-t_ave*t_ave);
-                        std::cout << tab << std::setw(PFW) << t_ave
+                        a_ostream << tab << std::setw(PFW) << t_ave
                                   << tab << std::setw(PFW) << t_rms << tab << std::setw(PFW) << rec._stats._max;
                     }
                 }
-                std::cout<<"\n";
+                a_ostream <<"\n";
             }
             // here print out a_label'ed measurement and prepare header for nested measurements
             else {
-                std::cout << std::string(CW,'=') << "\n"
+                a_ostream << std::string(CW,'=') << "\n"
                 << name << ": call-cnt: " << rec._count
                 << ", time: "<< std::scientific << rec._duration.count() << " s\n"
                 << std::string(CW,'-') << "\n";
 
-                std::cout << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
+                a_ostream << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
                 << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"t[s]"s) << tab
                 << _cnt_string(PFW,"t/t_en-scp"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
 
                 if constexpr (TimerOverHead)
-                    std::cout << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
+                    a_ostream << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
 
                 if constexpr (TimerStats) {
-                     std::cout << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
+                     a_ostream << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
                                << tab << _cnt_string(PFW,"t_max[s]"s);
                 }
-                std::cout<<"\n";
+                a_ostream <<"\n";
             }
         };
 
-        if (a_register.size()==1) { // special case of only one entry
-
+        // special case of only one entry
+        if (a_register.size()==1) {
             const auto& [name,record] = *a_register.cbegin();
             prnt_rec(name,record,0);
         }
-        else { // time-record of labeled scope
-
+        // time-record of labeled scope
+        else {
             // find records of nested scopes
             std::vector<std::pair<register_label_t<Register>,register_record_t<Register>>> nested_records;
-            for (const auto& [name,rec] : a_register) {
 
+            for (const auto& [name,rec] : a_register) {
                 if (a_record_label==name.substr(0,a_record_label.size()) &&
                     name.find("::",a_record_label.size())==std::string::npos) {
-
                     nested_records.emplace_back(std::make_pair(name.substr(a_record_label.size()),rec) );
                 }
             }
@@ -467,7 +480,8 @@ namespace fm {
                     prnt_rec (name,subrec,a_record._duration.count());
                     total._count+=subrec._count;
                     total._duration+=subrec._duration;
-                    total._overhead+=subrec._overhead;
+                    if constexpr (TimerOverHead)
+                        total._overhead+=subrec._overhead;
                 }
                 prnt_rec("total",total,a_record._duration.count());
             }
@@ -475,12 +489,13 @@ namespace fm {
             // analyse nested-timers
             for (const auto& [name,subrec] : nested_records) {
                 if (a_level==0) root={name,subrec};
-                print_record(a_record_label+name+"::",subrec,a_register,a_level+1);
+                print_record(a_record_label+name+"::",subrec,a_register,a_level+1,a_ostream);
             }
         }
-        if (a_level==0) std::cout<<std::string(80,'-')<<"\n";
+        if (a_level==0) a_ostream <<std::string(80,'-')<<"\n";
     }
 
+    // define static variables
     template <typename T, typename C, typename A>
     thread_local register_label_t<T> Timer<onduty,T,C,A>::_call_sequence{};
 #ifndef MULTI_THREAD
@@ -499,8 +514,12 @@ namespace fm {
     template <typename K, typename H>
     std::vector<typename AtomicGates<K,H>::atomic_gate> AtomicGates<K,H>::_gates{};
 
+    #ifndef NDEBUG
     template <typename K, typename H>
     std::atomic<int> AtomicGates<K,H>::_free_gates{};
+    #endif
 #endif
     };
 };
+
+#endif // TIMER_H
