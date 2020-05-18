@@ -1,6 +1,7 @@
 // Test your timer using default template parameters
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cstring>
 #include <thread>
@@ -15,13 +16,16 @@ int main(int argc, char* argv[]) {
     std::cout << "Hello Timer_t!\n";
     const std::string prog(argv[0]);
 
+    std::string filename{};
     int n_loops{0};
-    for (auto i{0}; i<argc; ++i)
+    for (auto i{0}; i<argc; ++i) {
+        if (strncmp(argv[i],"-f",2)==0) filename=argv[i+1];
         if (strncmp(argv[i],"-nl",3)==0) n_loops=std::stoi(argv[i+1]);
+    }
 
 #ifndef MULTI_THREAD
     if (n_loops<=0) {
-        std::cout<<"\n number of loops="<<n_loops<<".\n Run this prog with: "+prog+" -nl num_loops \n\n";
+        std::cout<<"\n number of loops="<<n_loops<<".\n Run this prog with: "+prog+" -nl num_loops [-f output_filename]\n\n";
         return 0;
     }
 #else
@@ -31,7 +35,7 @@ int main(int argc, char* argv[]) {
 
     if (n_threads<=0 || n_loops<=0) {
         std::cout << "\n thread count=" << n_threads << " and number of loops=" << n_loops << ".\n" 
-                  << " Run this prog with: "+prog+" -nt num_threads -nl num_loops \n\n";
+                  << " Run this prog with: "+prog+" -nt num_threads -nl num_loops [-f output_filename]\n\n";
         return 0;
     }
 
@@ -89,5 +93,12 @@ int main(int argc, char* argv[]) {
     }
 
 	tmr.stop();
-	Timer_t<>::print_record();
+    if (filename.size()) {
+        std::fstream file("timer.txt",std::ios_base::out|std::ios_base::trunc);
+        Timer_t<>::print_record(file);
+        file.close();
+    }
+    else {
+        Timer_t<>::print_record();
+    }
 }
