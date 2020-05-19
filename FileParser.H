@@ -44,18 +44,16 @@ namespace fm {
                         }
                         else if (const auto pos=s.find('='); pos!=std::string::npos) {
                             // store key and entry separated by '=' sign
-                            const std::string entry{s.substr(pos+1)};
 	                        key = s.substr(0,s.find_last_not_of(' ',pos-1)+1);
 
-                            m_entries[key] = entry;
+                            m_entries[key] = s.substr(pos+1);
                         }
 
                         // is there a backslash before commented out text ?
                         append_entry_to_prev_key=false;
-                        if (last<line.size()-1) {
-                            if (const auto pos= line.find_first_not_of(' ',last+1); pos!=std::string::npos && line.at(pos)=='\\')
-                                append_entry_to_prev_key=true;
-                        }
+                        int i=1+(int)last; 
+                        for ( ; i<line.size() && line[i]==' '; ++i) {}
+                        if (i<line.size() && line[i]=='\\') append_entry_to_prev_key=true;
                     }
                     else {
                         if (append_entry_to_prev_key) {
