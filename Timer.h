@@ -32,8 +32,7 @@
 #include <cassert>
 #include <cmath>
 
-namespace fm {
-    namespace profiling {
+namespace fm::profiling {
 
 #ifdef USE_TIMER
     constexpr unsigned TimerGranularityLim{1+USE_TIMER};
@@ -434,25 +433,28 @@ namespace fm {
                 << ", time: "<< std::scientific << rec._duration.count() << " s\n"
                 << std::string(CW,'-') << "\n";
 
-                a_ostream << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
-                << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"t[s]"s) << tab
-                << _cnt_string(PFW,"t/t_en-scp"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
+                // this avoids printing out headers for one entry case
+                if (es_count==0) {
+                    a_ostream << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
+                    << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"t[s]"s) << tab
+                    << _cnt_string(PFW,"t/t_en-scp"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
 
-                if constexpr (TimerOverHead)
-                    a_ostream << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
+                    if constexpr (TimerOverHead)
+                        a_ostream << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
 
-                if constexpr (TimerStats) {
-                     a_ostream << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
-                               << tab << _cnt_string(PFW,"t_max[s]"s);
+                    if constexpr (TimerStats) {
+                        a_ostream << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
+                                << tab << _cnt_string(PFW,"t_max[s]"s);
+                    }
+                    a_ostream <<"\n";
                 }
-                a_ostream <<"\n";
             }
         };
 
         // special case of only one entry
         if (a_register.size()==1) {
             const auto& [name,record] = *a_register.cbegin();
-            prnt_rec(name,record,0);
+            prnt_rec(name,record,-1);
         }
         // time-record of labeled scope
         else {
@@ -492,7 +494,7 @@ namespace fm {
                 print_record(a_record_label+name+"::",subrec,a_register,a_level+1,a_ostream);
             }
         }
-        if (a_level==0) a_ostream <<std::string(80,'-')<<"\n";
+        if (a_level==0) a_ostream <<std::string(80,'-')<<"\n\n\n";
     }
 
     // define static variables
@@ -519,7 +521,6 @@ namespace fm {
     std::atomic<int> AtomicGates<K,H>::_free_gates{};
     #endif
 #endif
-    };
 };
 
 #endif // TIMER_H
