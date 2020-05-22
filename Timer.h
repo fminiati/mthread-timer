@@ -1,19 +1,23 @@
-// F. Miniati
-// Timer.h: a simple templated instrument to time code execution.
-// Timer measures the number of function calls and their total duration using templated
-// parameter type I and R defaulted to size_t and std::chrono::duration<double>.
-// Time intervals are measured with a clock of template type Clock, which defaults
-// to std::chrono::high_resolution_clock type.
-// A measurement starts at Timer's construction and stops and is recorded as Timer
-// goes out of scope, unless the stop() function has already been called.
-// A granularity template parameter allows to switch on and off Timers for
-// progressively lighter blockss of code.
-// All measurements are recorded on the same object, a static map.
-// Timers' name tags are appended to a static string so that embedded functions calls 
-// with the desired level of granularity can be traced to measure their footprint on the
-// calling function performance.
 //
-// to use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] -DTIMER_OVERHEAD -DTIMER_STATS -DMULTI_THREAD
+// Copyright (C) 2020 Francesco Miniati <francesco.miniati@gmail.com>
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 //
 
 #ifndef TIMER_H
@@ -54,9 +58,8 @@ namespace fm::profiling {
 
 
     // time record
-    template <typename I=size_t, typename R=double>
-    struct TimeRecord {
-        I _count; // number of calls
+    template <typename I=size_t, typename R=double> struct TimeRecord {
+        I _count;                           // number of calls
         std::chrono::duration<R> _duration; // calls duration
 #ifdef TIMER_OVERHEAD
         std::chrono::duration<R> _overhead; // measurements overhad
@@ -65,6 +68,8 @@ namespace fm::profiling {
         struct { R _rms, _max; } _stats{};
 #endif
     };
+
+    // type traits for record
     template <typename T> struct time_record_type_traits {};
     template <typename I, typename R> struct time_record_type_traits<TimeRecord<I,R>> {
         using cnt_t =I;
@@ -78,6 +83,7 @@ namespace fm::profiling {
     template <typename Record=TimeRecord<>, typename Label=std::string, template <typename,typename> typename Map=std::unordered_map>
     using TimeRegister = Map<Label,Record>;
 
+    // type traits for register
     template <typename T> struct time_register_type_traits {};
     template <typename R, typename L> struct time_register_type_traits<TimeRegister<R,L>> {
         using record_t=R;
@@ -97,8 +103,7 @@ namespace fm::profiling {
     // load factors < 70%. Hence, we use about 40% more Registers/Gates than threads.
 
     // wait-free utility to manage atomic access to Registers by threads in multi-thread case
-    template <typename Key=std::thread::id, typename Hash=std::hash<Key>>
-    struct AtomicGates {
+    template <typename Key=std::thread::id, typename Hash=std::hash<Key>> struct AtomicGates {
 
         // find a free gate, lock it and return its index
         auto lock_gate(Key&& a_key) {
@@ -146,7 +151,6 @@ namespace fm::profiling {
             // initialise number of free gates
             _free_gates.store(gate_count,std::memory_order_release);
     #endif
-
             return gate_count;
         }
 
@@ -191,9 +195,9 @@ namespace fm::profiling {
 
     // timer measures when on duty
     constexpr bool onduty{true};
+
     template <typename Register, typename Clock, typename AtomicMapper>
     class Timer<onduty,Register,Clock,AtomicMapper> {
-
 #ifdef MULTI_THREAD
         // measurementes are stored in stratic registers;
         static std::vector<Register> _registers;
@@ -225,7 +229,6 @@ namespace fm::profiling {
         public:
         // constructor
         Timer(const std::string a_name) {
-
             // measure timer overhead
             if constexpr (TimerOverHead) _t_up=Clock::now();
 
@@ -242,6 +245,7 @@ namespace fm::profiling {
 #endif
             // record (thread's) timer's name
             _name=(_call_sequence.size()>0?"::":"")+a_name;
+
             // update (thread's) function calls tree
             _call_sequence+=_name;
 
@@ -260,8 +264,7 @@ namespace fm::profiling {
 
         // stop measurement before going out of scope
         void stop() {
-
-            // stop timer
+            // stop time
             const auto t_dw=Clock::now();
             const std::chrono::duration<record_rep_t<register_record_t<Register>>> duration=t_dw-_t_up;
 
@@ -313,7 +316,6 @@ namespace fm::profiling {
         // a default version and the possibility for the user to override it.
         static struct {
             void operator() (auto& a_register, auto a_all_registers) {
-
                const auto first{std::begin(a_all_registers)};
                const auto last{std::end(a_all_registers)};
 
@@ -353,7 +355,6 @@ namespace fm::profiling {
 
         // print out measurements
         static void print_record(std::ostream& a_ostream=std::cout, f_consolidate_t a_consolidate_records=_consolidate) {
-
 #ifndef MULTI_THREAD
             // now print out records
             print_record("",{},_register,0,a_ostream);
@@ -381,13 +382,11 @@ namespace fm::profiling {
                                                   const Register& a_register,
                                                   const unsigned  a_level,
                                                   std::ostream&   a_ostream) {
-
         // declare static root Timer set to zero-level Timer's
         static std::pair<register_label_t<Register>,register_record_t<Register>> root;
 
         // fat lambda that helps printing individual measurements
         auto prnt_rec=[&a_ostream,a_level](const auto name, const auto rec, const auto es_count) {
-
             // useful scope and constants
             using namespace std::string_literals;
             constexpr auto tabsize{3};
@@ -430,8 +429,10 @@ namespace fm::profiling {
             else {
                 a_ostream << std::string(CW,'=') << "\n"
                 << name << ": call-cnt: " << rec._count
-                << ", time: "<< std::scientific << rec._duration.count() << " s\n"
-                << std::string(CW,'-') << "\n";
+                << ", time: "<< std::scientific << rec._duration.count() << " s";
+                if constexpr (TimerOverHead)
+                    a_ostream << ", overi-head: " << std::setw(PFW) << rec._overhead.count() << " s";
+                a_ostream << '\n' << std::string(CW,'-') << "\n";
 
                 // this avoids printing out headers for one entry case
                 if (es_count==0) {
@@ -524,3 +525,5 @@ namespace fm::profiling {
 };
 
 #endif // TIMER_H
+//
+// Copyright (C) 2020 Francesco Miniati <francesco.miniati@gmail.com>
