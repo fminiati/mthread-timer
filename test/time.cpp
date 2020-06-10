@@ -9,6 +9,8 @@
 #include <cassert>
 #include "Timer.h"
 
+using Clock=std::chrono::steady_clock;
+
 int main(int argc, char* argv[]) {
     using namespace std::chrono_literals;
     using namespace fm::profiling;
@@ -29,8 +31,8 @@ int main(int argc, char* argv[]) {
 
     std::chrono::duration<double,std::micro> resolution;
     for (auto i{0}; i<n_loops; ) {
-        const auto t_i{std::chrono::high_resolution_clock::now()};
-        const auto t_e{std::chrono::high_resolution_clock::now()};
+        const auto t_i{Clock::now()};
+        const auto t_e{Clock::now()};
         if (t_e>t_i) {
             ++i;
             resolution+=t_e-t_i;
@@ -39,30 +41,30 @@ int main(int argc, char* argv[]) {
 
     std::chrono::duration<double,std::micro> latency;
     {
-        const auto t_i{std::chrono::high_resolution_clock::now()};
+        const auto t_i{Clock::now()};
         for (auto i{0}; i<n_loops; ++i) {
-            std::chrono::high_resolution_clock::now();
+            Clock::now();
         }
-        const auto t_e{std::chrono::high_resolution_clock::now()};
+        const auto t_e{Clock::now()};
         latency=t_e-t_i;
     }
 
     std::chrono::duration<double,std::micro> timer_overhead;
     {
         for (auto i{0}; i<n_loops; ++i) {
-            const auto t_i{std::chrono::high_resolution_clock::now()};
+            const auto t_i{Clock::now()};
 	        { Timer_t<> tmr("main"); }
-            const auto t_e{std::chrono::high_resolution_clock::now()};
+            const auto t_e{Clock::now()};
             timer_overhead+=t_e-t_i;
         }
     }
 
     std::cout<< "\n Measurements for " << n_loops << " loops \n\n";
-    std::cout<< " Resolution     : " << resolution.count() << "us\n";
-    std::cout<< " Latency        : " << latency.count() << "us\n";
-    std::cout<< " Timer Overhead : " << timer_overhead.count() << "us\n";
+    std::cout<< " Resolution     : " << resolution.count() << " us\n";
+    std::cout<< " Latency        : " << latency.count() << " us\n";
+    std::cout<< " Timer Overhead : " << timer_overhead.count() << " us\n\n";
     std::cout<< " Measurements per loop\n\n";
-    std::cout<< " Resolution     : " << resolution.count() / n_loops << "us\n";
-    std::cout<< " Latency        : " << latency.count() / n_loops << "us\n";
-    std::cout<< " Timer Overhead : " << timer_overhead.count() / n_loops << "us\n\n";
+    std::cout<< " Resolution     : " << resolution.count() / n_loops << " us\n";
+    std::cout<< " Latency        : " << latency.count() / n_loops << " us\n";
+    std::cout<< " Timer Overhead : " << timer_overhead.count() / n_loops << " us\n\n";
 }
