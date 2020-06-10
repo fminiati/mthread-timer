@@ -40,20 +40,14 @@ namespace fm::profiling {
 
 #ifdef USE_TIMER
     constexpr unsigned TimerGranularityLim{1+USE_TIMER};
-    #ifdef TIMER_OVERHEAD
-        constexpr bool TimerOverHead{true};
-    #else
-        constexpr bool TimerOverHead{false};
-    #endif
-    #ifdef TIMER_STATS
-        constexpr bool TimerStats{true};
-    #else
-        constexpr bool TimerStats{false};
-    #endif
 #else
     constexpr unsigned TimerGranularityLim{0};
-    constexpr bool     TimerOverHead{false};
-    constexpr bool     TimerStats{false};
+#endif
+
+#ifdef TIMER_STATS
+    constexpr bool TimerStats{true};
+#else
+    constexpr bool TimerStats{false};
 #endif
 
 
@@ -61,22 +55,10 @@ namespace fm::profiling {
     template <typename I=size_t, typename R=double> struct TimeRecord {
         I _count;                           // number of calls
         std::chrono::duration<R> _duration; // calls duration
-#ifdef TIMER_OVERHEAD
-        std::chrono::duration<R> _overhead; // measurements overhad
-#endif
 #ifdef TIMER_STATS
         struct { R _rms, _max; } _stats{};
 #endif
     };
-
-    // type traits for record
-    template <typename T> struct time_record_type_traits {};
-    template <typename I, typename R> struct time_record_type_traits<TimeRecord<I,R>> {
-        using cnt_t =I;
-        using rep_t =R;
-    };
-    template <typename T> using record_cnt_t = typename time_record_type_traits<T>::cnt_t;
-    template <typename T> using record_rep_t = typename time_record_type_traits<T>::rep_t;
 
 
     // register for time records: map measurements to identifiers
@@ -178,7 +160,8 @@ namespace fm::profiling {
 
     template <unsigned Granularity=1,
               typename Register=TimeRegister<>,
-              typename Clock=std::chrono::high_resolution_clock,
+              typename Clock=std::chrono::steady_clock,
+              //typename Clock=std::chrono::high_resolution_clock,
               typename AtomicMapper=AtomicGates<>>
     using Timer_t = Timer<OnDuty(Granularity),Register,Clock,AtomicMapper>;
 
@@ -186,7 +169,7 @@ namespace fm::profiling {
     // default timer does nothing because it is off duty
     template <bool B, typename R, typename C, typename A> class Timer {
         public:
-        Timer(const std::string a_name) {}
+        Timer(auto&& a_name) {}
 	    void stop() {}
         static void print_record() {}
         ~Timer() {}
@@ -215,9 +198,9 @@ namespace fm::profiling {
         thread_local static register_label_t<Register> _call_sequence;
 
         // member data
-        std::string _name;
+        size_t _prev_sequence_size;
         std::chrono::time_point<Clock> _t_up;
-        bool _stop{true};
+        typename Clock::duration _dt;
 
         // print out measurements
         static void print_record(const register_label_t<Register> a_record_label,
@@ -228,10 +211,9 @@ namespace fm::profiling {
 
         public:
         // constructor
-        Timer(const std::string a_name) {
-            // measure timer overhead
-            if constexpr (TimerOverHead) _t_up=Clock::now();
-
+        Timer(auto&& a_name)
+        :
+        _dt{Clock::duration::zero()}, _prev_sequence_size(_call_sequence.size()) {
 #ifdef MULTI_THREAD
             // first thread timer opens gate to a register
             if (_thread_timer_cnt==0)
@@ -239,64 +221,54 @@ namespace fm::profiling {
 
             // count timers in this thread
             ++_thread_timer_cnt;
-
-            // reference relevant register
-            Register& _register=_registers[_register_gate];
 #endif
-            // record (thread's) timer's name
-            _name=(_call_sequence.size()>0?"::":"")+a_name;
-
-            // update (thread's) function calls tree
-            _call_sequence+=_name;
-
-            // measure timer overhead
-            if constexpr (TimerOverHead)
-               _register[_call_sequence]._overhead += Clock::now()-_t_up;
+            // update (thread's) Timers sequence
+            _call_sequence.push_back('/');
+            _call_sequence.append(a_name);
 
             // timer starts
             _t_up=Clock::now();
         }
 
-        // stop and record measurement at destruction unless !_stop
+        // record measurement at destruction unless stop() was already called
         ~Timer() {
-            if (_stop) stop();
+            if (_dt==Clock::duration::zero()) {
+
+                _dt=Clock::now()-_t_up;
+
+                // get the record...
+#ifdef MULTI_THREAD
+                auto& record=_registers[_register_gate][_call_sequence];
+#else
+                auto& record=_register[_call_sequence];
+#endif
+                // ... update it
+                ++record._count;
+                record._duration += _dt;
+
+                if constexpr (TimerStats) {
+                    auto& [t_rms,t_max]=record._stats;
+                    const auto dt=_dt.count();
+                    t_rms += dt*dt;
+                    t_max = std::max(t_max,dt);
+                }
+
+                // restore sequence
+                _call_sequence.resize(_prev_sequence_size);
+
+#ifdef MULTI_THREAD
+                // final book-keeping: free gate if this thread no more uses it
+                if (--_thread_timer_cnt==0)
+                    _gates_keeper.free_gate(_register_gate);
+#endif
+            }
         }
 
-        // stop measurement before going out of scope
+        // stop timer: this function is meant to be used occasionally when scoping
+        // the Timer can be awkward. So for effieciency the time keeping is done in
+        // the destructor, which we call from here instead of the other way around.
         void stop() {
-            // stop time
-            const auto t_dw=Clock::now();
-            const std::chrono::duration<record_rep_t<register_record_t<Register>>> duration=t_dw-_t_up;
-
-            // invalidate destructor call to this function
-            _stop=false;
-
-            // get the record...
-#ifdef MULTI_THREAD
-            auto& record=_registers[_register_gate][_call_sequence];
-#else
-            auto& record=_register[_call_sequence];
-#endif
-            // ... update it
-            ++record._count;
-            record._duration += duration;
-
-            if constexpr (TimerStats) {
-                auto& [t_rms,t_max]=record._stats;
-                const auto dt=duration.count();
-                t_rms += dt*dt;
-                t_max = std::max(t_max,dt);
-            }
-
-            _call_sequence.resize(_call_sequence.size()-_name.size());
-
-#ifdef MULTI_THREAD
-            // final book-keeping: free gate if this thread no more uses it
-            if (--_thread_timer_cnt==0)
-                _gates_keeper.free_gate(_register_gate);
-#endif
-            // measure timer overhead
-            if constexpr (TimerOverHead) record._overhead += Clock::now()-t_dw;
+            this->~Timer();
         }
 
 #ifdef MULTI_THREAD
@@ -333,8 +305,6 @@ namespace fm::profiling {
                                const auto& th_record=th_node.mapped();
                                record._count   +=th_record._count;
                                record._duration+=th_record._duration;
-                               if constexpr (TimerOverHead)
-                                   record._overhead+=th_record._overhead;
                                if constexpr (TimerStats) {
                                    record._stats._rms+=th_record._stats._rms;
                                    record._stats._max+=(record._stats._max,th_record._stats._max);
@@ -356,8 +326,9 @@ namespace fm::profiling {
         // print out measurements
         static void print_record(std::ostream& a_ostream=std::cout, f_consolidate_t a_consolidate_records=_consolidate) {
 #ifndef MULTI_THREAD
+
             // now print out records
-            print_record("",{},_register,0,a_ostream);
+            print_record("/",{},_register,0,a_ostream);
 #else
             // freeze access to registers during print out
             // this implies waiting till all Timers are done recording
@@ -368,7 +339,7 @@ namespace fm::profiling {
             a_consolidate_records(full_record,_registers);
 
             // now print out records
-            print_record("",{},full_record,0,a_ostream);
+            print_record("/",{},full_record,0,a_ostream);
 
             // free access to all registers
             AtomicMapper::free_all_gates();
@@ -397,7 +368,7 @@ namespace fm::profiling {
             const int RFW{std::max(PFW,4+(int)root.first.size())};
 
             // formatting string output
-            auto _cnt_string=[](const auto w, const auto s) {
+            auto _cnt_string=[](const auto w, auto&& s) {
                 const auto s2=(w-std::size(s))/2;
                 return std::string(s2,' ')+s+std::string(s2,' ');
             };
@@ -411,10 +382,6 @@ namespace fm::profiling {
                 << std::setw(DFW) << std::scientific << std::setprecision(3) << rec._duration.count() << tab
                 << std::setw(PFW) << std::scientific << std::setprecision(2) << rec._duration.count()/es_count << tab
                 << std::setw(RFW) << rec._duration.count()/root.second._duration.count();
-                if constexpr (TimerOverHead) {
-                    a_ostream << tab << std::setw(PFW) << rec._overhead.count()
-                              << tab << std::setw(PFW) << rec._overhead.count()/rec._duration.count();
-                }
                 if constexpr (TimerStats) {
                     if (name!="total") {
                         const auto t_ave = rec._duration.count()/rec._count;
@@ -429,19 +396,14 @@ namespace fm::profiling {
             else {
                 a_ostream << std::string(CW,'=') << "\n"
                 << name << ": call-cnt: " << rec._count
-                << ", time: "<< std::scientific << rec._duration.count() << " s";
-                if constexpr (TimerOverHead)
-                    a_ostream << ", overi-head: " << std::setw(PFW) << rec._overhead.count() << " s";
-                a_ostream << '\n' << std::string(CW,'-') << "\n";
+                << ", time: "<< std::scientific << rec._duration.count() << " s\n"
+                << std::string(CW,'-') << "\n";
 
                 // this avoids printing out headers for one entry case
                 if (es_count==0) {
                     a_ostream << std::setw(indent) << std::setfill(' ') << std::left << "L-"+std::to_string(indent/tabsize)
                     << _cnt_string(NFW,"name"s) << tab << _cnt_string(PFW,"call-cnt"s) << tab << _cnt_string(DFW,"t[s]"s) << tab
                     << _cnt_string(PFW,"t/t_en-scp"s) << tab << _cnt_string(RFW,"t/t_"+root.first);
-
-                    if constexpr (TimerOverHead)
-                        a_ostream << tab << _cnt_string(PFW,"tmr_oh[s]"s) << tab << _cnt_string(PFW,"tmr_oh/t"s);
 
                     if constexpr (TimerStats) {
                         a_ostream << tab << _cnt_string(PFW,"t[s]/cnt"s) << tab << _cnt_string(PFW,"t_rms[s]"s)
@@ -464,7 +426,7 @@ namespace fm::profiling {
 
             for (const auto& [name,rec] : a_register) {
                 if (a_record_label==name.substr(0,a_record_label.size()) &&
-                    name.find("::",a_record_label.size())==std::string::npos) {
+                    name.find("/",a_record_label.size())==std::string::npos) {
                     nested_records.emplace_back(std::make_pair(name.substr(a_record_label.size()),rec) );
                 }
             }
@@ -483,8 +445,6 @@ namespace fm::profiling {
                     prnt_rec (name,subrec,a_record._duration.count());
                     total._count+=subrec._count;
                     total._duration+=subrec._duration;
-                    if constexpr (TimerOverHead)
-                        total._overhead+=subrec._overhead;
                 }
                 prnt_rec("total",total,a_record._duration.count());
             }
@@ -492,7 +452,7 @@ namespace fm::profiling {
             // analyse nested-timers
             for (const auto& [name,subrec] : nested_records) {
                 if (a_level==0) root={name,subrec};
-                print_record(a_record_label+name+"::",subrec,a_register,a_level+1,a_ostream);
+                print_record(a_record_label+name+"/",subrec,a_register,a_level+1,a_ostream);
             }
         }
         if (a_level==0) a_ostream <<std::string(80,'-')<<"\n\n\n";
