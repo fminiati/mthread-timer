@@ -189,7 +189,7 @@ namespace fm::profiling {
     {
         Timer(std::string &&) {}
         void stop() {}
-        static void print_record() {}
+        static void print_record(std::ostream& os=std::cout, f_consolidate_t x={}) {}
         ~Timer() {}
     };
 
