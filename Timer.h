@@ -67,7 +67,7 @@ namespace fm::profiling {
     // register for time records: map measurements to identifiers
     template <typename Record=TimeRecord<>,
     	      typename Label=std::string,
-              template <typename,typename> typename Map=std::unordered_map>
+              template <typename...> typename Map=std::unordered_map>
     using TimeRegister = Map<Label,Record>;
 
     // type traits for register
@@ -187,7 +187,7 @@ namespace fm::profiling {
     template <bool B, typename R, typename C, typename A>
     struct Timer
     {
-        Timer(auto &&) {}
+        Timer(std::string &&) {}
         void stop() {}
         static void print_record() {}
         ~Timer() {}
@@ -226,7 +226,7 @@ namespace fm::profiling {
 
     public:
         // constructor
-        Timer(auto &&a_name)
+        Timer(std::string &&a_name)
             : _dt{Clock::duration::zero()}, _prev_sequence_size(_call_sequence.size())
         {
 #ifdef MULTI_THREAD
