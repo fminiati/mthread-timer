@@ -87,10 +87,10 @@ namespace fm::profiling {
 
 #ifdef MULTI_THREAD
     // In multithread case, different threads write conncurrently to a pool of Registers,
-    // arranged in a static array. Threads' access to Registers is controlled by atomic_gates
+    // arranged in a static array. Threads' access to Registers is controlled by AtomicGates
     // which enforce atomicity of RMW operations. Upon request the AtomicGates searches for a
-    // free gate (a hash function converts thread_id to an index, which is then incremented till
-    // it reaches a free gate) and returns the array index of the corrensponding Register.
+    // free gate (a hash function converts thread_id to an index, which is duly incremented till
+    // it matches a free gate) and returns the array index of the corrensponding Register.
     // Based on simple tests, performance remains negligibly affected by collisions up to a
     // load factors < 70%. Hence, we use about 40% more Registers/Gates than threads.
 
@@ -189,7 +189,7 @@ namespace fm::profiling {
     {
         Timer(std::string &&) {}
         void stop() {}
-        static void print_record(std::ostream& os=std::cout, f_consolidate_t x={}) {}
+        static void print_record(std::ostream& os=std::cout, std::function<void()> x={}) {}
         ~Timer() {}
     };
 
