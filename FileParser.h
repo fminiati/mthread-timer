@@ -53,7 +53,7 @@ namespace fm
 
                         // is there a backslash before commented out text ?
                         append_entry_to_prev_key = false;
-                        int i = 1 + (int)last;
+                        auto i = 1 + last;
                         for (; i < line.size() && line[i] == ' '; ++i)
                         {}
                         if (i < line.size() && line[i] == '\\')
