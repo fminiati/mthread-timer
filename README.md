@@ -1,4 +1,4 @@
-Timer.h: 
+# Timer.h: 
 
 A simple templated profiling instrument to time multi-thread code execution.
 
