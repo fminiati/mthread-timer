@@ -34,5 +34,5 @@ execution time. An option to measure the overhead associated with the setup of T
 also attempted but eventually removed as the unaccounted costs of the constructor/destructor
 functions amounting to 50-100% of the total cause gross underestimates.
 
-To use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] -DTIMER_STATS -DMULTI_THREAD
+To use compile with: -DUSE_TIMER[=TIMER_GRANULARITY] [-DTIMER_STATS] [-DMULTI_THREAD]
 
